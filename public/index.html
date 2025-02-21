@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rastreador de Ubicación</title>
+    <title>Rastreador de Ubicación y Solicitudes de Viaje</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <style>
         body {
@@ -15,7 +15,7 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 20px;
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
         }
         #map {
@@ -23,7 +23,7 @@
             border-radius: 8px;
             border: 2px solid #ddd;
         }
-        .location-history {
+        .scrollable-section {
             height: 400px;
             overflow-y: auto;
             padding: 15px;
@@ -31,7 +31,7 @@
             border-radius: 8px;
             border: 2px solid #ddd;
         }
-        .location-entry {
+        .location-entry, .travel-request-entry {
             background: white;
             padding: 10px;
             margin-bottom: 10px;
@@ -43,15 +43,92 @@
             color: #333;
             margin-bottom: 20px;
         }
+        .travel-form {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .travel-form input, .travel-form select {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .travel-form button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .travel-form button:hover {
+            background: #45a049;
+        }
+        .matches {
+            margin-top: 10px;
+            padding: 10px;
+            background: #e8f5e9;
+            border-radius: 4px;
+        }
+        .tab-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .tab-button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            border: none;
+            background: #f0f0f0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .tab-button.active {
+            background: #4CAF50;
+            color: white;
+        }
+        #userId {
+            padding: 8px;
+            margin: 10px auto;
+            display: block;
+            width: 200px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
-    <h1>Rastreador de Ubicación</h1>
-    <div class="container">
+    <h1>Rastreador de Ubicación y Solicitudes de Viaje</h1>
+
+    <input type="text" id="userId" placeholder="Ingresa tu ID de usuario" value="usuario1">
+
+    <div class="tab-container">
+        <button class="tab-button active" onclick="showTab('locations')">Ubicaciones</button>
+        <button class="tab-button" onclick="showTab('travelRequests')">Solicitudes de Viaje</button>
+    </div>
+
+    <div id="locationsTab" class="container">
         <div id="map"></div>
-        <div class="location-history" id="locationHistory">
+        <div class="scrollable-section" id="locationHistory">
             <h2>Historial de Ubicaciones</h2>
-            <!-- Las ubicaciones se cargarán aquí dinámicamente -->
+        </div>
+    </div>
+
+    <div id="travelRequestsTab" class="container" style="display: none;">
+        <div class="scrollable-section">
+            <h2>Crear Solicitud de Viaje</h2>
+            <div class="travel-form">
+                <input type="text" id="originCity" placeholder="Ciudad de Origen">
+                <input type="text" id="destinationCity" placeholder="Ciudad de Destino">
+                <input type="date" id="travelDate">
+                <input type="text" id="notes" placeholder="Notas adicionales">
+                <button onclick="createTravelRequest()">Crear Solicitud</button>
+            </div>
+        </div>
+        <div class="scrollable-section" id="travelRequestHistory">
+            <h2>Historial de Solicitudes</h2>
         </div>
     </div>
 
@@ -65,7 +142,25 @@
 
         let markers = [];
 
-        // Función para actualizar el historial
+        // Función para mostrar/ocultar tabs
+        function showTab(tabName) {
+            document.getElementById('locationsTab').style.display = tabName === 'locations' ? 'grid' : 'none';
+            document.getElementById('travelRequestsTab').style.display = tabName === 'travelRequests' ? 'grid' : 'none';
+
+            // Actualizar botones activos
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+                if (button.textContent.toLowerCase().includes(tabName === 'locations' ? 'ubicaciones' : 'solicitudes')) {
+                    button.classList.add('active');
+                }
+            });
+
+            if (tabName === 'travelRequests') {
+                updateTravelRequests();
+            }
+        }
+
+        // Función para actualizar el historial de ubicaciones
         async function updateLocationHistory() {
             try {
                 const response = await fetch('/api/locations');
@@ -85,6 +180,7 @@
                     const marker = L.marker([location.latitude, location.longitude])
                         .bindPopup(`
                             <strong>Usuario:</strong> ${location.userId}<br>
+                            <strong>Ciudad:</strong> ${location.city || 'No disponible'}<br>
                             <strong>Dirección:</strong> ${location.address}<br>
                             <strong>Timestamp:</strong> ${location.timestamp}
                         `)
@@ -101,6 +197,7 @@
                     entry.className = 'location-entry';
                     entry.innerHTML = `
                         <strong>Usuario:</strong> ${location.userId}<br>
+                        <strong>Ciudad:</strong> ${location.city || 'No disponible'}<br>
                         <strong>Timestamp:</strong> ${location.timestamp}<br>
                         <strong>Dirección:</strong> ${location.address}<br>
                         <strong>Coordenadas:</strong> ${location.latitude}, ${location.longitude}<br>
@@ -114,9 +211,107 @@
             }
         }
 
+        // Función para crear una solicitud de viaje
+        async function createTravelRequest() {
+            const userId = document.getElementById('userId').value;
+            const originCity = document.getElementById('originCity').value;
+            const destinationCity = document.getElementById('destinationCity').value;
+            const date = document.getElementById('travelDate').value;
+            const notes = document.getElementById('notes').value;
+
+            if (!userId || !originCity || !destinationCity || !date) {
+                alert('Por favor completa todos los campos requeridos');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/travel-requests', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        userId,
+                        originCity,
+                        destinationCity,
+                        date,
+                        notes
+                    })
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    alert('Solicitud de viaje creada exitosamente');
+                    document.getElementById('originCity').value = '';
+                    document.getElementById('destinationCity').value = '';
+                    document.getElementById('travelDate').value = '';
+                    document.getElementById('notes').value = '';
+                    updateTravelRequests();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error al crear la solicitud:', error);
+                alert('Error al crear la solicitud de viaje');
+            }
+        }
+
+        // Función para actualizar el historial de solicitudes
+        async function updateTravelRequests() {
+            const userId = document.getElementById('userId').value;
+            try {
+                const response = await fetch(`/api/travel-requests/${userId}`);
+                const requests = await response.json();
+
+                const historyContainer = document.getElementById('travelRequestHistory');
+                historyContainer.innerHTML = '<h2>Historial de Solicitudes</h2>';
+
+                requests.forEach(request => {
+                    const entry = document.createElement('div');
+                    entry.className = 'travel-request-entry';
+
+                    let matchesHtml = '';
+                    if (request.matches.length > 0) {
+                        matchesHtml = `
+                            <div class="matches">
+                                <strong>Coincidencias (${request.matches.length}):</strong><br>
+                                ${request.matches.map(match => `
+                                    Usuario: ${match.userId}<br>
+                                    Ciudad: ${match.city}<br>
+                                    Última actualización: ${match.timestamp}
+                                `).join('<br>')}
+                            </div>
+                        `;
+                    }
+
+                    entry.innerHTML = `
+                        <strong>ID Solicitud:</strong> ${request.id}<br>
+                        <strong>Usuario:</strong> ${request.userId}<br>
+                        <strong>Origen:</strong> ${request.originCity}<br>
+                        <strong>Destino:</strong> ${request.destinationCity}<br>
+                        <strong>Fecha:</strong> ${request.date}<br>
+                        <strong>Timestamp:</strong> ${request.timestamp}<br>
+                        ${request.notes ? `<strong>Notas:</strong> ${request.notes}<br>` : ''}
+                        <strong>Estado:</strong> ${request.status}
+                        ${matchesHtml}
+                    `;
+                    historyContainer.appendChild(entry);
+                });
+            } catch (error) {
+                console.error('Error al actualizar las solicitudes:', error);
+            }
+        }
+
         // Actualizar cada 5 segundos
         updateLocationHistory();
         setInterval(updateLocationHistory, 5000);
+
+        // Actualizar solicitudes cada 10 segundos
+        setInterval(() => {
+            if (document.getElementById('travelRequestsTab').style.display !== 'none') {
+                updateTravelRequests();
+            }
+        }, 10000);
     </script>
 </body>
 </html>
